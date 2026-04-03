@@ -1,0 +1,151 @@
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js"></script>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trading Journal</title>
+<style>
+body { font-family: Arial, sans-serif; margin:0; padding:0; background:#1e1e2f; color:#fff; }
+.container { max-width: 500px; margin: auto; padding: 20px; }
+button { background:#4CAF50; color:#fff; border:none; padding:10px; margin-top:5px; cursor:pointer; width:100%; }
+input { width:100%; padding:10px; margin:5px 0; border-radius:5px; border:none; }
+table { width:100%; border-collapse: collapse; margin-top:10px; }
+th, td { border:1px solid #444; padding:5px; text-align:center; }
+th { background:#333; }
+h2 { text-align:center; }
+</style>
+</head>
+<body>
+<div class="container">
+<h2>Trading Journal</h2>
+<div id="auth-section">
+  <input type="email" id="email" placeholder="Email">
+  <input type="password" id="password" placeholder="Password">
+  <button onclick="register()">Register</button>
+  <button onclick="login()">Login</button>
+  <button onclick="googleLogin()">Login with Google</button>
+</div>
+
+<div id="journal-section" style="display:none;">
+  <button onclick="logout()">Logout</button>
+  <h3>Add Trade</h3>
+  <input type="text" id="pair" placeholder="Pair (e.g. EURUSD)">
+  <input type="number" id="entry" placeholder="Entry Price">
+  <input type="number" id="exit" placeholder="Exit Price">
+  <input type="number" id="lot" placeholder="Lot Size">
+  <button onclick="addTrade()">Add Trade</button>
+
+  <h3>Stats</h3>
+  <p>Total Trades: <span id="totalTrades">0</span></p>
+  <p>Win Rate: <span id="winRate">0</span>%</p>
+  <p>Profit/Loss: <span id="profitLoss">0</span></p>
+  <p>Drawdown: <span id="drawdown">0</span></p>
+
+  <h3>Trade History</h3>
+  <table id="tradeTable">
+    <tr><th>Pair</th><th>Entry</th><th>Exit</th><th>Lot</th><th>Profit/Loss</th></tr>
+  </table>
+</div>
+</div>
+
+<!-- Firebase SDK -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+<script>
+// 🔹 const firebaseConfig = {
+  apiKey: "AIzaSyAynmY7fO-Dy6uYsvJmrIkdRc2X1BwtsbY",
+  authDomain: "trading-journal-b749d.firebaseapp.com",
+  projectId: "trading-journal-b749d",
+  storageBucket: "trading-journal-b749d.firebasestorage.app",
+  messagingSenderId: "120463363208",
+  appId: "1:120463363208:web:cfc837bd8a81e4c370633d"
+};
+
+
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+// 🔹 Authentication
+auth.onAuthStateChanged(user => {
+  if(user){
+    document.getElementById("auth-section").style.display = "none";
+    document.getElementById("journal-section").style.display = "block";
+    loadTrades();
+  } else {
+    document.getElementById("auth-section").style.display = "block";
+    document.getElementById("journal-section").style.display = "none";
+  }
+});
+
+function register(){
+  const email = document.getElementById("email").value;
+  const password = document.getElementById("password").value;
+  auth.createUserWithEmailAndPassword(email, password)
+      .catch(e => alert(e.message));
+}
+
+function login(){
+  const email = document.getElementById("email").value;
+  const password = document.getElementById("password").value;
+  auth.signInWithEmailAndPassword(email, password)
+      .catch(e => alert(e.message));
+}
+
+function googleLogin(){
+  const provider = new firebase.auth.GoogleAuthProvider();
+  auth.signInWithPopup(provider).catch(e => alert(e.message));
+}
+
+function logout(){ auth.signOut(); }
+
+// 🔹 Journal Functions
+function addTrade(){
+  const pair = document.getElementById("pair").value;
+  const entry = parseFloat(document.getElementById("entry").value);
+  const exit = parseFloat(document.getElementById("exit").value);
+  const lot = parseFloat(document.getElementById("lot").value);
+  if(!pair || !entry || !exit || !lot){ alert("Fill all fields"); return; }
+
+  const profitLoss = (exit - entry) * lot; // simple calc
+  db.collection("users").doc(auth.currentUser.uid).collection("trades")
+    .add({pair, entry, exit, lot, profitLoss, timestamp: Date.now()})
+    .then(() => loadTrades());
+}
+
+function loadTrades(){
+  const table = document.getElementById("tradeTable");
+  table.innerHTML = "<tr><th>Pair</th><th>Entry</th><th>Exit</th><th>Lot</th><th>Profit/Loss</th></tr>";
+  let total = 0, wins = 0, totalTrades = 0, maxDD = 0, profitLossSum = 0;
+  db.collection("users").doc(auth.currentUser.uid).collection("trades")
+    .orderBy("timestamp")
+    .get()
+    .then(snapshot => {
+      snapshot.forEach(doc => {
+        const t = doc.data();
+        const row = table.insertRow();
+        row.insertCell(0).innerText = t.pair;
+        row.insertCell(1).innerText = t.entry;
+        row.insertCell(2).innerText = t.exit;
+        row.insertCell(3).innerText = t.lot;
+        row.insertCell(4).innerText =t.profitLoss.toFixed(2);
+
+        totalTrades++;
+        profitLossSum +=t.profitLoss;
+        if(t.profitLoss>0) wins++;
+        if(t.profitLoss<maxDD) maxDD =t.profitLoss;
+      });
+      document.getElementById("totalTrades").innerText = totalTrades;
+      document.getElementById("winRate").innerText = totalTrades ? ((wins/totalTrades)*100).toFixed(2) : 0;
+      document.getElementById("profitLoss").innerText = profitLossSum.toFixed(2);
+      document.getElementById("drawdown").innerText = maxDD.toFixed(2);
+    });
+}
+</script>
+</body>
+</html>
